@@ -221,3 +221,5 @@ Exception in thread "main" java.lang.OutOfMemoryError: Direct buffer memory
 ```
 
 如果直接内存导致的内存溢出，一个明显的特征是在Heap Dump文件中不会看尽啊有什么明显的异常情况。
+
+> 注：本文为《深入理解Java虚拟机：JVM高级特性与最佳实战》读书笔记

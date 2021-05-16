@@ -51,3 +51,6 @@ Java虚拟机对于Class文件每一部分（自然也包括常量池）的格�
 直接内存并不是虚拟机运行时数据区的一部分，也不是《Java虚拟机规范》中定义的内存区域。但直接内存使用不当也可能导致OutOfMemoryError异常。
 
 在JDK1.4中新加入的NIO类，引入了基于Channelled与Buffer的I/O方式，可以使用Native函数库直接分配堆外内存，然后通过一个存储在Java堆里面的DirectByteBuffer对象作为这块内存的引用进行操作。避免了在Java堆和Native堆中来回复制数据。
+
+> 注：本文为《深入理解Java虚拟机：JVM高级特性与最佳实战》读书笔记
+
