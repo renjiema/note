@@ -600,4 +600,59 @@ channel.position(newPos);
 
 操作系统出于性能的考虑，会将数据缓存，不是立刻写入磁盘。可以调用 force(true)  方法将文件内容和元数据（文件的权限等信息）立刻写入磁盘
 
+### 3.2 两个 Channel 传输数据
+
+```java
+String FROM = "helloword/data.txt";
+String TO = "helloword/to.txt";
+long start = System.nanoTime();
+try (FileChannel from = new FileInputStream(FROM).getChannel();
+     FileChannel to = new FileOutputStream(TO).getChannel();
+    ) {
+    from.transferTo(0, from.size(), to);
+} catch (IOException e) {
+    e.printStackTrace();
+}
+long end = System.nanoTime();
+System.out.println("transferTo 用时：" + (end - start) / 1000000.0);
+```
+
+输出
+
+```
+transferTo 用时：8.2011
+```
+
+但是transferTo每次最多传输2G大小的文件，超过 2G大小的文件传输如下所示：
+
+```java
+public class TestFileChannelTransferTo {
+    public static void main(String[] args) {
+        try (
+                FileChannel from = new FileInputStream("data.txt").getChannel();
+                FileChannel to = new FileOutputStream("to.txt").getChannel();
+        ) {
+            // 效率高，底层会利用操作系统的零拷贝进行优化
+            long size = from.size();
+            // left 变量代表还剩余多少字节
+            for (long left = size; left > 0; ) {
+                System.out.println("position:" + (size - left) + " left:" + left);
+                left -= from.transferTo((size - left), left, to);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+实际传输一个超大文件
+
+```
+position:0 left:7769948160
+position:2147483647 left:5622464513
+position:4294967294 left:3474980866
+position:6442450941 left:1327497219
+```
+
 
