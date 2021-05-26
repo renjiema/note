@@ -1101,3 +1101,69 @@ int count = selector.selectNow();
 > * 调用 selector.wakeup()
 > * 调用 selector.close()
 > * selector 所在线程 interrupt
+
+### 4.3 处理 accept 事件
+
+客户端代码为
+
+```java
+public class Client {
+    public static void main(String[] args) {
+        try (Socket socket = new Socket("localhost", 8080)) {
+            System.out.println(socket);
+            socket.getOutputStream().write("world".getBytes());
+            System.in.read();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+
+
+服务器端代码为
+
+```java
+@Slf4j
+public class ChannelAccept {
+    public static void main(String[] args) {
+        try (ServerSocketChannel channel = ServerSocketChannel.open()) {
+            channel.bind(new InetSocketAddress(8080));
+            System.out.println(channel);
+            Selector selector = Selector.open();
+            channel.configureBlocking(false);
+            channel.register(selector, SelectionKey.OP_ACCEPT);
+
+            while (true) {
+                int count = selector.select();
+                log.debug("select count: {}", count);
+                // 获取所有事件
+                Set<SelectionKey> keys = selector.selectedKeys();
+                // 遍历所有事件，逐一处理
+                Iterator<SelectionKey> iter = keys.iterator();
+                while (iter.hasNext()) {
+                    SelectionKey key = iter.next();
+                    // 判断事件类型
+                    if (key.isAcceptable()) {
+                        ServerSocketChannel c = (ServerSocketChannel) key.channel();
+                        // 必须处理
+                        SocketChannel sc = c.accept();
+                        log.debug("{}", sc);
+                    }
+                    // 处理完毕，必须将事件移除
+                    iter.remove();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+
+
+#### 💡 事件发生后能否不处理
+
+> 事件发生后，要么处理，要么取消（cancel），不能什么都不做，否则下次该事件仍会触发，这是因为 nio 底层使用的是水平触发
