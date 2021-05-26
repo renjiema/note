@@ -1167,3 +1167,95 @@ public class ChannelAccept {
 #### 💡 事件发生后能否不处理
 
 > 事件发生后，要么处理，要么取消（cancel），不能什么都不做，否则下次该事件仍会触发，这是因为 nio 底层使用的是水平触发
+
+### 4.4 处理 read 事件
+
+```java
+@Slf4j
+public class ChannelRead {
+    public static void main(String[] args) {
+        try (ServerSocketChannel channel = ServerSocketChannel.open()) {
+            channel.bind(new InetSocketAddress(8080));
+            System.out.println(channel);
+            Selector selector = Selector.open();
+            channel.configureBlocking(false);
+            channel.register(selector, SelectionKey.OP_ACCEPT);
+
+            while (true) {
+                int count = selector.select();
+                log.debug("select count: {}", count);
+
+                // 获取所有事件
+                Set<SelectionKey> keys = selector.selectedKeys();
+
+                // 遍历所有事件，逐一处理
+                Iterator<SelectionKey> iter = keys.iterator();
+                while (iter.hasNext()) {
+                    SelectionKey key = iter.next();
+                    // 判断事件类型
+                    if (key.isAcceptable()) {
+                        ServerSocketChannel c = (ServerSocketChannel) key.channel();
+                        // 必须处理
+                        SocketChannel sc = c.accept();
+                        sc.configureBlocking(false);
+                        sc.register(selector, SelectionKey.OP_READ);
+                        log.debug("连接已建立: {}", sc);
+                    } else if (key.isReadable()) {
+                        SocketChannel sc = (SocketChannel) key.channel();
+                        ByteBuffer buffer = ByteBuffer.allocate(128);
+                        int read = sc.read(buffer);
+                        if(read == -1) {
+                            key.cancel();
+                            sc.close();
+                        } else {
+                            buffer.flip();
+                            debug(buffer);
+                        }
+                    }
+                    // 处理完毕，必须将事件移除
+                    iter.remove();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+开启两个客户端，修改一下发送文字，输出
+
+```
+sun.nio.ch.ServerSocketChannelImpl[/0:0:0:0:0:0:0:0:8080]
+21:16:39 [DEBUG] [main] c.i.n.ChannelDemo6 - select count: 1
+21:16:39 [DEBUG] [main] c.i.n.ChannelDemo6 - 连接已建立: java.nio.channels.SocketChannel[connected local=/127.0.0.1:8080 remote=/127.0.0.1:60367]
+21:16:39 [DEBUG] [main] c.i.n.ChannelDemo6 - select count: 1
+         +-------------------------------------------------+
+         |  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f |
++--------+-------------------------------------------------+----------------+
+|00000000| 68 65 6c 6c 6f                                  |hello           |
++--------+-------------------------------------------------+----------------+
+21:16:59 [DEBUG] [main] c.i.n.ChannelDemo6 - select count: 1
+21:16:59 [DEBUG] [main] c.i.n.ChannelDemo6 - 连接已建立: java.nio.channels.SocketChannel[connected local=/127.0.0.1:8080 remote=/127.0.0.1:60378]
+21:16:59 [DEBUG] [main] c.i.n.ChannelDemo6 - select count: 1
+         +-------------------------------------------------+
+         |  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f |
++--------+-------------------------------------------------+----------------+
+|00000000| 77 6f 72 6c 64                                  |world           |
++--------+-------------------------------------------------+----------------+
+```
+
+
+
+#### 💡 为何要 iter.remove()
+
+> 因为 select 在事件发生后，就会将相关的 key 放入 selectedKeys 集合，但不会在处理完后从 selectedKeys 集合中移除，需要我们自己编码删除。例如
+>
+> * 第一次触发了 ssckey 上的 accept 事件，没有移除 ssckey 
+> * 第二次触发了 sckey 上的 read 事件，但这时 selectedKeys 中还有上次的 ssckey ，在处理时因为没有真正的 serverSocket 连上了，就会导致空指针异常
+
+
+
+#### 💡 cancel 的作用
+
+> cancel 会取消注册在 selector 上的 channel，并从 keys 集合中删除 key 后续不会再监听事件
