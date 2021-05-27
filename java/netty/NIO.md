@@ -1716,3 +1716,62 @@ public class ChannelDemo7 {
 
 > * Runtime.getRuntime().availableProcessors() 如果工作在 docker 容器下，因为容器不是物理隔离的，会拿到物理 cpu 个数，而不是容器申请时的个数
 > * 这个问题直到 jdk 10 才修复，使用 jvm 参数 UseContainerSupport 配置， 默认开启
+
+### 4.7 UDP
+
+* UDP 是无连接的，client 发送数据不会管 server 是否开启
+* server 这边的 receive 方法会将接收到的数据存入 byte buffer，但如果数据报文超过 buffer 大小，多出来的数据会被默默抛弃
+
+首先启动服务器端
+
+```java
+public class UdpServer {
+    public static void main(String[] args) {
+        try (DatagramChannel channel = DatagramChannel.open()) {
+            channel.socket().bind(new InetSocketAddress(9999));
+            System.out.println("waiting...");
+            ByteBuffer buffer = ByteBuffer.allocate(32);
+            channel.receive(buffer);
+            buffer.flip();
+            debug(buffer);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+输出
+
+```
+waiting...
+```
+
+
+
+运行客户端
+
+```java
+public class UdpClient {
+    public static void main(String[] args) {
+        try (DatagramChannel channel = DatagramChannel.open()) {
+            ByteBuffer buffer = StandardCharsets.UTF_8.encode("hello");
+            InetSocketAddress address = new InetSocketAddress("localhost", 9999);
+            channel.send(buffer, address);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+接下来服务器端输出
+
+```
+         +-------------------------------------------------+
+         |  0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f |
++--------+-------------------------------------------------+----------------+
+|00000000| 68 65 6c 6c 6f                                  |hello           |
++--------+-------------------------------------------------+----------------+
+```
+
