@@ -1775,3 +1775,56 @@ public class UdpClient {
 +--------+-------------------------------------------------+----------------+
 ```
 
+## 5. NIO vs BIO
+
+### 5.1 stream vs channel
+
+* stream 不会自动缓冲数据，channel 会利用系统提供的发送缓冲区、接收缓冲区（更为底层）
+* stream 仅支持阻塞 API，channel 同时支持阻塞、非阻塞 API，网络 channel 可配合 selector 实现多路复用
+* 二者均为全双工，即读写可以同时进行
+
+
+
+### 5.2 IO 模型
+
+同步阻塞、同步非阻塞、同步多路复用、异步阻塞（没有此情况）、异步非阻塞
+
+* 同步：线程自己去获取结果（一个线程）
+* 异步：线程自己不去获取结果，而是由其它线程送结果（至少两个线程）
+
+
+
+当调用一次 channel.read 或 stream.read 后，会切换至操作系统内核态来完成真正数据读取，而读取又分为两个阶段，分别为：
+
+* 等待数据阶段
+* 复制数据阶段
+
+![](https://raw.githubusercontent.com/renjiema/images/main/blogs/20210529234029.png)
+
+* 阻塞 IO
+
+  ![](https://raw.githubusercontent.com/renjiema/images/main/blogs/20210529234035.png)
+
+* 非阻塞  IO
+
+  ![](https://raw.githubusercontent.com/renjiema/images/main/blogs/20210529234040.png)
+
+* 多路复用
+
+  ![](https://raw.githubusercontent.com/renjiema/images/main/blogs/20210529234046.png)
+
+* 信号驱动
+
+* 异步 IO
+
+  ![](https://raw.githubusercontent.com/renjiema/images/main/blogs/20210529234053.png)
+
+* 阻塞 IO vs 多路复用
+
+  ![](https://raw.githubusercontent.com/renjiema/images/main/blogs/20210529234057.png)
+
+  ![](https://raw.githubusercontent.com/renjiema/images/main/blogs/20210529234101.png)
+
+#### 🔖 参考
+
+UNIX 网络编程 - 卷 I
