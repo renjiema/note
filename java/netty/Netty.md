@@ -253,3 +253,67 @@ serverBootstrap.option(ChannelOption.SO_RCVBUF, 10);
 >   * 已发送的数据都收到 ack 时，则需要发送
 >   * 上述条件不满足，但发生超时（一般为 200ms）则需要发送
 >   * 除上述情况，延迟发送
+
+### 1.4 解决方案
+
+1. 短链接，发一个包建立一次连接，这样连接建立到连接断开之间就是消息的边界，缺点效率太低
+2. 每一条消息采用固定长度，缺点浪费空间
+3. 每一条消息采用分隔符，例如 \n，缺点需要转义
+4. 每一条消息分为 head 和 body，head 中包含 body 的长度
+
+
+
+#### 方法1，短链接
+
+以解决粘包为例
+
+```java
+public class HelloWorldClient {
+    static final Logger log = LoggerFactory.getLogger(HelloWorldClient.class);
+
+    public static void main(String[] args) {
+        // 分 10 次发送
+        for (int i = 0; i < 10; i++) {
+            send();
+        }
+    }
+
+    private static void send() {
+        NioEventLoopGroup worker = new NioEventLoopGroup();
+        try {
+            Bootstrap bootstrap = new Bootstrap();
+            bootstrap.channel(NioSocketChannel.class);
+            bootstrap.group(worker);
+            bootstrap.handler(new ChannelInitializer<SocketChannel>() {
+                @Override
+                protected void initChannel(SocketChannel ch) throws Exception {
+                    log.debug("conneted...");
+                    ch.pipeline().addLast(new LoggingHandler(LogLevel.DEBUG));
+                    ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                        @Override
+                        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+                            log.debug("sending...");
+                            ByteBuf buffer = ctx.alloc().buffer();
+                            buffer.writeBytes(new byte[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15});
+                            ctx.writeAndFlush(buffer);
+                            // 发完即关
+                            ctx.close();
+                        }
+                    });
+                }
+            });
+            ChannelFuture channelFuture = bootstrap.connect("localhost", 8080).sync();
+            channelFuture.channel().closeFuture().sync();
+
+        } catch (InterruptedException e) {
+            log.error("client error", e);
+        } finally {
+            worker.shutdownGracefully();
+        }
+    }
+}
+```
+
+输出，略
+
+> 半包用这种办法还是不好解决，因为接收方的缓冲区大小是有限的
