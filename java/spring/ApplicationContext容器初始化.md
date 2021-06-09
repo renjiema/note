@@ -240,7 +240,7 @@ protected final void refreshBeanFactory() throws BeansException {
 }
 ```
 
-首先判断`BeanFactory`是否存在，如果存在则销毁beans并关闭beanFactory，接着创建 `DefaultListableBeanFactory`，并调用`loadBeanDefinitions(beanFactory)`装载BeanDefinition。
+首先判断`BeanFactory`是否存在，如果存在则销毁beans并关闭beanFactory，接着创建 `DefaultListableBeanFactory`(默认的IOC容器，一个完整的、功能成熟的 IOC 容器)，并调用`loadBeanDefinitions(beanFactory)`装载BeanDefinition。
 
 ## 5、载入配置路径
 
@@ -1318,6 +1318,14 @@ public class DefaultListableBeanFactory extends AbstractAutowireCapableBeanFacto
 	}
 }
 ```
+
+registerBeanDefinition 方法是在 BeanDefinitionRegistry 接口中声明的，DefaultListableBeanFactory 类实现了 BeanDefinitionRegistry 接口，并实现了该方法，我们来看分析下该方法：
+
+1. 首先对传入的 beanDefinition 对象进行校验，这也是注册前的最后一次校验，不过这个时候 BeanDefinition 对象已经到手了，所以这个校验并非 XML 文件校验，这里主要是对 methodOverrides 的校验。
+2. 接下来会根据 beanName 从 beanDefinitionMap 中获取 BeanDefinition，看看当前 Bean 是否已经定义过了。beanDefinitionMap 是一个 Map 集合，这个集合中 key 是 beanName，value 是 BeanDefinition 对象。
+3. 如果 BeanDefinition 已经存在了，那么接下来会判断是否允许 BeanDefinition 覆盖，如果不允许，就直接抛出异常，如果允许 BeanDefinition 的覆盖，那就向 beanDefinitionMap 中再次存一次值，覆盖之前的值。
+4. 如果 BeanDefinition 不存在，那就直接注册。直接注册分两种情况：项目已经运行了和项目还没运行。
+5. 如果项目已经运行，由于 beanDefinitionMap 是一个全局变量，可能存在并发问题，所以要加锁处理。否则就直接注册，所谓的注册就是把对象存入 beanDefinitionMap 中，同时将 beanName 都存入 beanDefinitionNames 集合中。
 
 Bean 配置信息中配置的 Bean 被解析过后，已经注册到 IOC 容器中，真正完成了 IOC 容器初始化所做的全部工作。现在 IOC 容器中已经建立了整个 Bean 的配置信息，这些BeanDefinition 信息已经可以使用，并且可以被检索，IOC 容器的作用就是对这些注册的 Bean 定义信息进行处理和维护。这些的注册的 Bean 定义信息是 IOC 容器控制反转的基础，容器才可以进行依赖注入。
 
