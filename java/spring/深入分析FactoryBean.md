@@ -346,49 +346,179 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 		}
 		return (T) bean;
 	}
-	protected Object getObjectForBeanInstance(
-			Object beanInstance, String name, String beanName, @Nullable RootBeanDefinition mbd) {
+}
+```
 
-		// Don't let calling code try to dereference the factory if the bean isn't a factory.
-		if (BeanFactoryUtils.isFactoryDereference(name)) {
-			if (beanInstance instanceof NullBean) {
-				return beanInstance;
-			}
-			if (!(beanInstance instanceof FactoryBean)) {
-				throw new BeanIsNotAFactoryException(beanName, beanInstance.getClass());
-			}
-			if (mbd != null) {
-				mbd.isFactoryBean = true;
-			}
+> TODO:
+
+接下来看看`getObjectForBeanInstance`方法：
+
+```java
+protected Object getObjectForBeanInstance(
+		Object beanInstance, String name, String beanName, @Nullable RootBeanDefinition mbd) {
+	// Don't let calling code try to dereference the factory if the bean isn't a factory.
+        //判断name是不是&开头
+	if (BeanFactoryUtils.isFactoryDereference(name)) {
+		if (beanInstance instanceof NullBean) {
 			return beanInstance;
 		}
-
-		// Now we have the bean instance, which may be a normal bean or a FactoryBean.
-		// If it's a FactoryBean, we use it to create a bean instance, unless the
-		// caller actually wants a reference to the factory.
 		if (!(beanInstance instanceof FactoryBean)) {
-			return beanInstance;
+			throw new BeanIsNotAFactoryException(beanName, beanInstance.getClass());
 		}
-
-		Object object = null;
 		if (mbd != null) {
 			mbd.isFactoryBean = true;
 		}
-		else {
-			object = getCachedObjectForFactoryBean(beanName);
+		return beanInstance;
+	}
+	// Now we have the bean instance, which may be a normal bean or a FactoryBean.
+	// If it's a FactoryBean, we use it to create a bean instance, unless the
+	// caller actually wants a reference to the factory.
+        //如果beanInstance不是工厂实例，那么就是Bean实例直接返回
+	if (!(beanInstance instanceof FactoryBean)) {
+		return beanInstance;
+	}
+	Object object = null;
+	if (mbd != null) {
+		mbd.isFactoryBean = true;
+	}
+	else {
+                //从缓存查询实例，第一次肯定没有
+		object = getCachedObjectForFactoryBean(beanName);
+	}
+	if (object == null) {
+		// Return bean instance from factory.
+		FactoryBean<?> factory = (FactoryBean<?>) beanInstance;
+		// Caches object obtained from FactoryBean if it is a singleton.
+		if (mbd == null && containsBeanDefinition(beanName)) {
+			mbd = getMergedLocalBeanDefinition(beanName);
 		}
-		if (object == null) {
-			// Return bean instance from factory.
-			FactoryBean<?> factory = (FactoryBean<?>) beanInstance;
-			// Caches object obtained from FactoryBean if it is a singleton.
-			if (mbd == null && containsBeanDefinition(beanName)) {
-				mbd = getMergedLocalBeanDefinition(beanName);
+		boolean synthetic = (mbd != null && mbd.isSynthetic());
+                //通过factory创建bean实例
+		object = getObjectFromFactoryBean(factory, beanName, !synthetic);
+	}
+	return object;
+}
+```
+
+`BeanFactoryUtils.isFactoryDereference`方法用来判断 name 是不是以 & 开头的，如果是以 & 开头的，表示想要获取的是一个 FactoryBean，那么此时如果 beanInstance 刚好就是一个 FactoryBean，则直接返回。并将 mbd 中的 isFactoryBean 属性设置为 true。
+
+如果 name 不是以 & 开头的，说明用户就是想获取 FactoryBean 所构造的 Bean，那么此时如果 beanInstance 不是 FactoryBean 实例，则直接返回。
+
+如果当前的 beanInstance 是一个 FactoryBean，而用户想获取的只是一个普通 Bean，那么就会进入到接下来的代码中。
+
+首先调用`getCachedObjectForFactoryBean`方法去从缓存中获取 Bean。如果是第一次获取 Bean，这个缓存中是没有的数据的，`getObject`方法调用过一次之后，Bean 才有可能被保存到缓存中了。
+
+为什么说有可能呢？Bean 如果是单例的，则会被保存在缓存中，Bean 如果不是单例的，则不会被保存在缓存中，而是每次加载都去创建新的。
+
+如果没能从缓存中加载到 Bean，则最终会调用`getObjectFromFactoryBean`方法去加载 Bean。
+
+```java
+protected Object getObjectFromFactoryBean(FactoryBean<?> factory, String beanName, boolean shouldPostProcess) {
+	if (factory.isSingleton() && containsSingleton(beanName)) {
+		synchronized (getSingletonMutex()) {
+			Object object = this.factoryBeanObjectCache.get(beanName);
+			if (object == null) {
+				object = doGetObjectFromFactoryBean(factory, beanName);
+				// Only post-process and store if not put there already during getObject() call above
+				// (e.g. because of circular reference processing triggered by custom getBean calls)
+				Object alreadyThere = this.factoryBeanObjectCache.get(beanName);
+				if (alreadyThere != null) {
+					object = alreadyThere;
+				}
+				else {
+					if (shouldPostProcess) {
+						if (isSingletonCurrentlyInCreation(beanName)) {
+							// Temporarily return non-post-processed object, not storing it yet..
+							return object;
+						}
+						beforeSingletonCreation(beanName);
+						try {
+							object = postProcessObjectFromFactoryBean(object, beanName);
+						}
+						catch (Throwable ex) {
+							throw new BeanCreationException(beanName,
+									"Post-processing of FactoryBean's singleton object failed", ex);
+						}
+						finally {
+							afterSingletonCreation(beanName);
+						}
+					}
+					if (containsSingleton(beanName)) {
+						this.factoryBeanObjectCache.put(beanName, object);
+					}
+				}
 			}
-			boolean synthetic = (mbd != null && mbd.isSynthetic());
-			object = getObjectFromFactoryBean(factory, beanName, !synthetic);
+			return object;
+		}
+	}
+	else {
+		Object object = doGetObjectFromFactoryBean(factory, beanName);
+		if (shouldPostProcess) {
+			try {
+				object = postProcessObjectFromFactoryBean(object, beanName);
+			}
+			catch (Throwable ex) {
+				throw new BeanCreationException(beanName, "Post-processing of FactoryBean's object failed", ex);
+			}
 		}
 		return object;
 	}
 }
 ```
+
+在`getObjectFromFactoryBean`方法中，首先通过`isSingleton`和`containsSingleton`两个方法判断`getObject`方法返回值是否是单例的。
+
+Singleton Pattern：
+
+为了保证单例使用了`synchronized`进行同步处理，先去缓存中再拿一次，看能不能拿到。如果缓存中没有，调用`doGetObjectFromFactoryBean`方法去获取，这是真正的获取方法。获取到之后，进行 Bean 的后置处理，处理完成后，如果 Bean 是单例的，就缓存起来。
+
+Prototype Pattern：
+
+不是单例就简单，直接调用`doGetObjectFromFactoryBean`方法获取 Bean 实例，然后进行后置处理就完事，也不用缓存。
+
+接下来我们就来看看`doGetObjectFromFactoryBean`方法：
+
+```java
+private Object doGetObjectFromFactoryBean(FactoryBean<?> factory, String beanName) throws BeanCreationException {
+	Object object;
+	try {
+		if (System.getSecurityManager() != null) {
+			AccessControlContext acc = getAccessControlContext();
+			try {
+				object = AccessController.doPrivileged((PrivilegedExceptionAction<Object>) factory::getObject, acc);
+			} catch (PrivilegedActionException pae) {
+				throw pae.getException();
+			}
+		} else {
+			object = factory.getObject();
+		}
+	} catch (FactoryBeanNotInitializedException ex) {
+		throw new BeanCurrentlyInCreationException(beanName, ex.toString());
+	} catch (Throwable ex) {
+		throw new BeanCreationException(beanName, "FactoryBean threw exception on object creation", ex);
+	}
+	// Do not accept a null value for a FactoryBean that's not fully
+	// initialized yet: Many FactoryBeans just return null then.
+	if (object == null) {
+		if (isSingletonCurrentlyInCreation(beanName)) {
+			throw new BeanCurrentlyInCreationException(
+					beanName, "FactoryBean which is currently in creation returned null from getObject");
+		}
+		object = new NullBean();
+	}
+	return object;
+```
+
+最终通过 `factory.getObject()`方法获取beanName实例。
+
+## 4.总结
+
+FactoryBean 在 Spring 框架中有非常广泛的应用，一些常用的FactoryBean：
+
+* SqlSessionFactoryBean：mybatis中用于提供SqlSessionFactory
+* Jackson2ObjectMapperFactoryBean：用于为`MappingJackson2HttpMessageConverter`类提供`ObjectMapper`对象
+* FormattingConversionServiceFactoryBean
+* EhCacheManagerFactoryBean
+
+还有很多其他的应用就不在此一一列举，可在日常使用中多留意。
 
