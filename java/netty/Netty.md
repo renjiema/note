@@ -779,4 +779,116 @@ public class HelloWorldClient {
 
 ```
 
+## 2. 协议设计与解析
 
+### 2.1 为什么需要协议？
+
+TCP/IP 中消息传输基于流的方式，没有边界。
+
+协议的目的就是划定消息的边界，制定通信双方要共同遵守的通信规则
+
+例如：在网络上传输
+
+```
+下雨天留客天留我不留
+```
+
+是中文一句著名的无标点符号句子，在没有标点符号情况下，这句话有数种拆解方式，而意思却是完全不同，所以常被用作讲述标点符号的重要性
+
+一种解读
+
+```
+下雨天留客，天留，我不留
+```
+
+另一种解读
+
+```
+下雨天，留客天，留我不？留
+```
+
+如何设计协议呢？其实就是给网络传输的信息加上“标点符号”。但通过分隔符来断句不是很好，因为分隔符本身如果用于传输，那么必须加以区分。因此，下面一种协议较为常用
+
+``` 
+定长字节表示内容长度 + 实际内容
+```
+
+例如，假设一个中文字符长度为 3，按照上述协议的规则，发送信息方式如下，就不会被接收方弄错意思了
+
+```
+0f下雨天留客06天留09我不留
+```
+
+### 2.2 redis 协议举例
+
+```java
+NioEventLoopGroup worker = new NioEventLoopGroup();
+byte[] LINE = {13, 10};
+try {
+    Bootstrap bootstrap = new Bootstrap();
+    bootstrap.channel(NioSocketChannel.class);
+    bootstrap.group(worker);
+    bootstrap.handler(new ChannelInitializer<SocketChannel>() {
+        @Override
+        protected void initChannel(SocketChannel ch) {
+            ch.pipeline().addLast(new LoggingHandler());
+            ch.pipeline().addLast(new ChannelInboundHandlerAdapter() {
+                // 会在连接 channel 建立成功后，会触发 active 事件
+                @Override
+                public void channelActive(ChannelHandlerContext ctx) {
+                    set(ctx);
+                    get(ctx);
+                }
+                private void get(ChannelHandlerContext ctx) {
+                    ByteBuf buf = ctx.alloc().buffer();
+                    buf.writeBytes("*2".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("$3".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("get".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("$3".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("aaa".getBytes());
+                    buf.writeBytes(LINE);
+                    ctx.writeAndFlush(buf);
+                }
+                private void set(ChannelHandlerContext ctx) {
+                    ByteBuf buf = ctx.alloc().buffer();
+                    buf.writeBytes("*3".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("$3".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("set".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("$3".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("aaa".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("$3".getBytes());
+                    buf.writeBytes(LINE);
+                    buf.writeBytes("bbb".getBytes());
+                    buf.writeBytes(LINE);
+                    ctx.writeAndFlush(buf);
+                }
+
+                @Override
+                public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                    ByteBuf buf = (ByteBuf) msg;
+                    System.out.println(buf.toString(Charset.defaultCharset()));
+                }
+            });
+        }
+    });
+    ChannelFuture channelFuture = bootstrap.connect("localhost", 6379).sync();
+    channelFuture.channel().closeFuture().sync();
+} catch (InterruptedException e) {
+    log.error("client error", e);
+} finally {
+    worker.shutdownGracefully();
+}
+```
+
+
+
+### 
