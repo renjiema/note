@@ -934,3 +934,151 @@ try {
 }
 ```
 
+### 2.4 自定义协议要素
+
+* 魔数，用来在第一时间判定是否是无效数据包
+* 版本号，可以支持协议的升级
+* 序列化算法，消息正文到底采用哪种序列化反序列化方式，可以由此扩展，例如：json、protobuf、hessian、jdk
+* 指令类型，是登录、注册、单聊、群聊... 跟业务相关
+* 请求序号，为了双工通信，提供异步能力
+* 正文长度
+* 消息正文
+
+
+
+#### 编解码器
+
+根据上面的要素，设计一个登录请求消息和登录响应消息，并使用 Netty 完成收发
+
+```java
+@Slf4j
+public class MessageCodec extends ByteToMessageCodec<Message> {
+
+    @Override
+    protected void encode(ChannelHandlerContext ctx, Message msg, ByteBuf out) throws Exception {
+        // 1. 4 字节的魔数
+        out.writeBytes(new byte[]{1, 2, 3, 4});
+        // 2. 1 字节的版本,
+        out.writeByte(1);
+        // 3. 1 字节的序列化方式 jdk 0 , json 1
+        out.writeByte(0);
+        // 4. 1 字节的指令类型
+        out.writeByte(msg.getMessageType());
+        // 5. 4 个字节
+        out.writeInt(msg.getSequenceId());
+        // 无意义，对齐填充
+        out.writeByte(0xff);
+        // 6. 获取内容的字节数组
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(bos);
+        oos.writeObject(msg);
+        byte[] bytes = bos.toByteArray();
+        // 7. 长度
+        out.writeInt(bytes.length);
+        // 8. 写入内容
+        out.writeBytes(bytes);
+    }
+
+    @Override
+    protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+        int magicNum = in.readInt();
+        byte version = in.readByte();
+        byte serializerType = in.readByte();
+        byte messageType = in.readByte();
+        int sequenceId = in.readInt();
+        in.readByte();
+        int length = in.readInt();
+        byte[] bytes = new byte[length];
+        in.readBytes(bytes, 0, length);
+        ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(bytes));
+        Message message = (Message) ois.readObject();
+        log.debug("{}, {}, {}, {}, {}, {}", magicNum, version, serializerType, messageType, sequenceId, length);
+        log.debug("{}", message);
+        out.add(message);
+    }
+}
+```
+
+测试
+
+```java
+EmbeddedChannel channel = new EmbeddedChannel(
+    new LoggingHandler(),
+    new LengthFieldBasedFrameDecoder(
+        1024, 12, 4, 0, 0),
+    new MessageCodec()
+);
+// encode
+LoginRequestMessage message = new LoginRequestMessage("zhangsan", "123", "张三");
+//        channel.writeOutbound(message);
+// decode
+ByteBuf buf = ByteBufAllocator.DEFAULT.buffer();
+new MessageCodec().encode(null, message, buf);
+
+ByteBuf s1 = buf.slice(0, 100);
+ByteBuf s2 = buf.slice(100, buf.readableBytes() - 100);
+s1.retain(); // 引用计数 2
+channel.writeInbound(s1); // release 1
+channel.writeInbound(s2);
+```
+
+#### 💡 什么时候可以加 @Sharable
+
+* 当 handler 不保存状态时，就可以安全地在多线程下被共享
+* 但要注意对于编解码器类，不能继承 ByteToMessageCodec 或 CombinedChannelDuplexHandler 父类，他们的构造方法对 @Sharable 有限制
+* 如果能确保编解码器不会保存状态，可以继承 MessageToMessageCodec 父类
+
+```java
+@Slf4j
+@ChannelHandler.Sharable
+/**
+ * 必须和 LengthFieldBasedFrameDecoder 一起使用，确保接到的 ByteBuf 消息是完整的
+ */
+public class MessageCodecSharable extends MessageToMessageCodec<ByteBuf, Message> {
+    @Override
+    protected void encode(ChannelHandlerContext ctx, Message msg, List<Object> outList) throws Exception {
+        ByteBuf out = ctx.alloc().buffer();
+        // 1. 4 字节的魔数
+        out.writeBytes(new byte[]{1, 2, 3, 4});
+        // 2. 1 字节的版本,
+        out.writeByte(1);
+        // 3. 1 字节的序列化方式 jdk 0 , json 1
+        out.writeByte(0);
+        // 4. 1 字节的指令类型
+        out.writeByte(msg.getMessageType());
+        // 5. 4 个字节
+        out.writeInt(msg.getSequenceId());
+        // 无意义，对齐填充
+        out.writeByte(0xff);
+        // 6. 获取内容的字节数组
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        ObjectOutputStream oos = new ObjectOutputStream(bos);
+        oos.writeObject(msg);
+        byte[] bytes = bos.toByteArray();
+        // 7. 长度
+        out.writeInt(bytes.length);
+        // 8. 写入内容
+        out.writeBytes(bytes);
+        outList.add(out);
+    }
+
+    @Override
+    protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+        int magicNum = in.readInt();
+        byte version = in.readByte();
+        byte serializerType = in.readByte();
+        byte messageType = in.readByte();
+        int sequenceId = in.readInt();
+        in.readByte();
+        int length = in.readInt();
+        byte[] bytes = new byte[length];
+        in.readBytes(bytes, 0, length);
+        ObjectInputStream ois = new ObjectInputStream(new ByteArrayInputStream(bytes));
+        Message message = (Message) ois.readObject();
+        log.debug("{}, {}, {}, {}, {}, {}", magicNum, version, serializerType, messageType, sequenceId, length);
+        log.debug("{}", message);
+        out.add(message);
+    }
+}
+```
+
