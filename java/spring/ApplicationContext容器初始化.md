@@ -227,7 +227,7 @@ protected final void refreshBeanFactory() throws BeansException {
 		//创建beanFactory容器
 		DefaultListableBeanFactory beanFactory = createBeanFactory();
 		beanFactory.setSerializationId(getId());
-		//对 IOC 容器进行定制化，如设置启动参数，开启注解的自动装配等
+		//设置 BeanFactory 的两个配置属性：是否允许 Bean 覆盖、是否允许循环引用
 		customizeBeanFactory(beanFactory);
 		//调用加载BeanDefinition方法，又使用一个委派模式，在当前类中只定义了抽象的loadBeanDefinitions方法
 		loadBeanDefinitions(beanFactory);
